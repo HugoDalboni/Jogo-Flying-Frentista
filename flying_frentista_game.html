@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flying Frentista</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(to bottom, #70c5ce 0%, #459ba8 100%);
+            font-family: 'Arial', sans-serif;
+            overflow: hidden;
+        }
+        
+        #gameContainer {
+            position: relative;
+            background: linear-gradient(to bottom, #70c5ce 0%, #459ba8 70%, #ded895 70%, #ded895 100%);
+            border: 4px solid #000;
+            border-radius: 8px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        }
+        
+        #gameCanvas {
+            display: block;
+            background: transparent;
+        }
+        
+        #gameUI {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            pointer-events: none;
+        }
+        
+        .game-title {
+            font-size: 48px;
+            font-weight: bold;
+            color: #fff;
+            text-shadow: 3px 3px 0px #000;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .game-instruction {
+            font-size: 24px;
+            color: #fff;
+            text-shadow: 2px 2px 0px #000;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        
+        .game-score {
+            font-size: 36px;
+            font-weight: bold;
+            color: #fff;
+            text-shadow: 2px 2px 0px #000;
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        
+        .game-over {
+            background: rgba(0,0,0,0.8);
+            color: #fff;
+            padding: 30px;
+            border-radius: 15px;
+            text-align: center;
+            border: 3px solid #fff;
+        }
+        
+        .restart-btn {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 18px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-top: 15px;
+            pointer-events: all;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+            transition: transform 0.1s;
+        }
+        
+        .restart-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.4);
+        }
+        
+        .restart-btn:active {
+            transform: translateY(0);
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas" width="400" height="600"></canvas>
+        <div id="gameUI">
+            <div id="startScreen">
+                <div class="game-title">⛽ FLYING FRENTISTA</div>
+                <div class="game-instruction">Clique ou pressione ESPAÇO para voar!</div>
+                <div class="game-instruction">Evite os pneus murchos nas pilastras!</div>
+            </div>
+            <div id="gameOverScreen" style="display: none;">
+                <div class="game-over">
+                    <h2>Game Over!</h2>
+                    <p>Pontuação: <span id="finalScore">0</span></p>
+                    <p>Melhor: <span id="bestScore">0</span></p>
+                    <button class="restart-btn" onclick="restartGame()">Jogar Novamente</button>
+                </div>
+            </div>
+            <div id="scoreDisplay" class="game-score" style="display: none;">0</div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Game state
+        let gameState = 'start'; // 'start', 'playing', 'gameOver'
+        let score = 0;
+        let bestScore = 0;
+        
+        // Contexto de áudio
+        let audioContext;
+        
+        // Função para criar sons usando Web Audio API
+        function playJumpSound() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            
+            // Som tipo pac-man para o pulo
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            
+            oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+            oscillator.frequency.exponentialRampToValueAtTime(1200, audioContext.currentTime + 0.1);
+            
+            gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+            
+            oscillator.start(audioContext.currentTime);
+            oscillator.stop(audioContext.currentTime + 0.1);
+        }
+        
+        function playCollisionSound() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            
+            // Som de calibrador enchendo pneu - mais realista
+            const whiteNoise = audioContext.createBufferSource();
+            const noiseBuffer = audioContext.createBuffer(1, audioContext.sampleRate * 0.8, audioContext.sampleRate);
+            const output = noiseBuffer.getChannelData(0);
+            
+            // Gerar ruído branco
+            for (let i = 0; i < noiseBuffer.length; i++) {
+                output[i] = Math.random() * 2 - 1;
+            }
+            whiteNoise.buffer = noiseBuffer;
+            
+            const filter = audioContext.createBiquadFilter();
+            const gainNode = audioContext.createGain();
+            const oscillator = audioContext.createOscillator();
+            
+            // Configurar filtro para som de ar
+            filter.type = 'bandpass';
+            filter.frequency.setValueAtTime(1500, audioContext.currentTime);
+            filter.Q.setValueAtTime(0.8, audioContext.currentTime);
+            
+            // Oscilador para o som mecânico do compressor
+            oscillator.type = 'sawtooth';
+            oscillator.frequency.setValueAtTime(80, audioContext.currentTime);
+            
+            const oscGain = audioContext.createGain();
+            
+            whiteNoise.connect(filter);
+            filter.connect(gainNode);
+            oscillator.connect(oscGain);
+            oscGain.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            
+            // Volume do ruído do ar
+            gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.8);
+            
+            // Volume do compressor
+            oscGain.gain.setValueAtTime(0.1, audioContext.currentTime);
+            oscGain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.8);
+            
+            whiteNoise.start(audioContext.currentTime);
+            whiteNoise.stop(audioContext.currentTime + 0.8);
+            oscillator.start(audioContext.currentTime);
+            oscillator.stop(audioContext.currentTime + 0.8);
+        }
+        
+        // Bird properties
+        const bird = {
+            x: 80,
+            y: canvas.height / 2,
+            width: 30,
+            height: 25,
+            velocity: 0,
+            gravity: 0.11,
+            jumpStrength: -4.3,
+            rotation: 0
+        };
+        
+        // Pipes array
+        let pipes = [];
+        const pipeWidth = 80;
+        const pipeGap = 160;
+        const pipeSpeed = 1.5;
+        
+        // Ground
+        const ground = {
+            x: 0,
+            y: canvas.height - 50,
+            width: canvas.width,
+            height: 50
+        };
+        
+        // Cloud animation
+        let clouds = [];
+        for(let i = 0; i < 3; i++) {
+            clouds.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * 200 + 50,
+                width: 60 + Math.random() * 40,
+                height: 30 + Math.random() * 20,
+                speed: 0.5 + Math.random() * 0.5
+            });
+        }
+        
+        function drawBird() {
+            ctx.save();
+            ctx.translate(bird.x + bird.width/2, bird.y + bird.height/2);
+            ctx.rotate(bird.rotation);
+            
+            // Bico de gasolina na mão direita
+            ctx.save();
+            ctx.translate(20, 5);
+            
+            // Mangueira
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.quadraticCurveTo(15, -5, 25, 5);
+            ctx.stroke();
+            
+            // Bico da bomba (azul)
+            ctx.fillStyle = '#4169E1';
+            ctx.fillRect(-4, -2, 12, 4);
+            ctx.strokeStyle = '#1E3A8A';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(-4, -2, 12, 4);
+            
+            // Gatilho
+            ctx.fillStyle = '#C0C0C0';
+            ctx.fillRect(3, 2, 6, 3);
+            ctx.strokeRect(3, 2, 6, 3);
+            
+            ctx.restore();
+            
+            // Frentista body (círculo com uniforme Shell)
+            ctx.fillStyle = '#FF0000'; // Vermelho Shell
+            ctx.beginPath();
+            ctx.arc(0, 0, bird.width/2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#CC0000';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            // Logo Shell no peito
+            ctx.fillStyle = '#FFFF00'; // Amarelo Shell
+            ctx.beginPath();
+            ctx.arc(0, 2, 8, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#FF0000';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            
+            // Rosto
+            ctx.fillStyle = '#FFDBAC'; // Cor da pele
+            ctx.beginPath();
+            ctx.arc(0, -5, 10, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Olhos
+            ctx.fillStyle = '#000';
+            ctx.beginPath();
+            ctx.arc(-3, -7, 2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(3, -7, 2, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Sorriso
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(0, -3, 4, 0, Math.PI);
+            ctx.stroke();
+            
+            // Boné Shell
+            ctx.fillStyle = '#FF0000';
+            ctx.beginPath();
+            ctx.arc(0, -12, 8, Math.PI, 0);
+            ctx.fill();
+            ctx.fillRect(-8, -12, 16, 3);
+            
+            // Aba do boné
+            ctx.fillStyle = '#CC0000';
+            ctx.fillRect(-10, -9, 20, 2);
+            
+            ctx.restore();
+        }
+        
+        function drawFlatTire(centerX, centerY) {
+            // Pneu murcho visto de frente (2D) - formato achatado na parte inferior
+            ctx.fillStyle = '#2A2A2A'; // Preto do pneu
+            ctx.strokeStyle = '#1A1A1A';
+            ctx.lineWidth = 2;
+            
+            // Desenhar pneu murcho com parte inferior achatada
+            ctx.beginPath();
+            // Parte superior circular
+            ctx.arc(centerX, centerY - 5, 25, 0, Math.PI, false);
+            // Parte inferior achatada
+            ctx.lineTo(centerX - 25, centerY + 8);
+            ctx.lineTo(centerX + 25, centerY + 8);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            
+            // Roda metalizada no centro (ligeiramente para cima)
+            ctx.fillStyle = '#C0C0C0';
+            ctx.strokeStyle = '#A0A0A0';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(centerX, centerY - 2, 15, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            
+            // Furos da roda
+            ctx.fillStyle = '#666666';
+            const holeRadius = 2.5;
+            const centerHoleRadius = 8;
+            
+            // Furo central
+            ctx.beginPath();
+            ctx.arc(centerX, centerY - 2, 4, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // 6 furos ao redor do centro
+            for(let i = 0; i < 6; i++) {
+                const angle = (i * Math.PI * 2) / 6;
+                const holeX = centerX + Math.cos(angle) * centerHoleRadius;
+                const holeY = centerY - 2 + Math.sin(angle) * centerHoleRadius;
+                ctx.beginPath();
+                ctx.arc(holeX, holeY, holeRadius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            // Borda interna da roda
+            ctx.strokeStyle = '#808080';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(centerX, centerY - 2, 11, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            // Banda de rodagem (sulcos na lateral do pneu)
+            ctx.strokeStyle = '#0F0F0F';
+            ctx.lineWidth = 2;
+            
+            // Sulcos laterais verticais
+            for(let i = -3; i <= 3; i++) {
+                ctx.beginPath();
+                ctx.moveTo(centerX - 20, centerY - 10 + i * 3);
+                ctx.lineTo(centerX - 16, centerY - 10 + i * 3);
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.moveTo(centerX + 16, centerY - 10 + i * 3);
+                ctx.lineTo(centerX + 20, centerY - 10 + i * 3);
+                ctx.stroke();
+            }
+            
+            // Sulcos na parte superior
+            for(let i = -2; i <= 2; i++) {
+                ctx.beginPath();
+                ctx.moveTo(centerX + i * 8, centerY - 25);
+                ctx.lineTo(centerX + i * 8, centerY - 20);
+                ctx.stroke();
+            }
+            
+            // Válvula do pneu (na lateral direita)
+            ctx.fillStyle = '#C0C0C0';
+            ctx.fillRect(centerX + 18, centerY - 3, 4, 2);
+            ctx.strokeStyle = '#808080';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(centerX + 18, centerY - 3, 4, 2);
+            
+            // Tampa da válvula
+            ctx.fillStyle = '#000';
+            ctx.fillRect(centerX + 22, centerY - 2, 1, 1);
+            
+            // Sombra embaixo do pneu murcho
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+            ctx.beginPath();
+            ctx.ellipse(centerX, centerY + 10, 22, 4, 0, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        
+        function drawPipe(x, topHeight) {
+            // Pilastra superior (lisa sem textura) - mais curta
+            ctx.fillStyle = '#808080'; // Concreto
+            ctx.fillRect(x + 15, 0, pipeWidth - 30, topHeight - 35);
+            ctx.strokeStyle = '#606060';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x + 15, 0, pipeWidth - 30, topHeight - 35);
+            
+            // Caixa de vidro superior - maior
+            ctx.fillStyle = 'rgba(200, 255, 255, 0.3)'; // Vidro
+            ctx.fillRect(x - 5, topHeight - 40, pipeWidth + 10, 40);
+            ctx.strokeStyle = '#C0C0C0';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(x - 5, topHeight - 40, pipeWidth + 10, 40);
+            
+            // Reflexos no vidro
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(x - 3, topHeight - 35);
+            ctx.lineTo(x + 10, topHeight - 20);
+            ctx.stroke();
+            
+            // Pneu murcho superior (usando a nova função)
+            drawFlatTire(x + pipeWidth/2, topHeight - 20);
+            
+            // Pilastra inferior (lisa sem textura) - mais curta
+            const bottomY = topHeight + pipeGap;
+            const bottomHeight = canvas.height - ground.height - bottomY - 35;
+            ctx.fillStyle = '#808080';
+            ctx.fillRect(x + 15, bottomY + 35, pipeWidth - 30, bottomHeight);
+            ctx.strokeStyle = '#606060';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x + 15, bottomY + 35, pipeWidth - 30, bottomHeight);
+            
+            // Caixa de vidro inferior - maior
+            ctx.fillStyle = 'rgba(200, 255, 255, 0.3)';
+            ctx.fillRect(x - 5, bottomY, pipeWidth + 10, 40);
+            ctx.strokeStyle = '#C0C0C0';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(x - 5, bottomY, pipeWidth + 10, 40);
+            
+            // Reflexos no vidro inferior
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(x - 3, bottomY + 5);
+            ctx.lineTo(x + 10, bottomY + 20);
+            ctx.stroke();
+            
+            // Pneu murcho inferior (usando a nova função)
+            drawFlatTire(x + pipeWidth/2, bottomY + 20);
+        }
+        
+        function drawGround() {
+            ctx.fillStyle = '#2F4F4F'; // Asfalto
+            ctx.fillRect(0, ground.y, ground.width, ground.height);
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(0, ground.y, ground.width, ground.height);
+            
+            // Faixas da pista
+            ctx.fillStyle = '#FFFF00';
+            for(let i = 0; i < ground.width; i += 40) {
+                ctx.fillRect(i + 10, ground.y + 20, 20, 4);
+            }
+        }
+        
+        function drawClouds() {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+            clouds.forEach(cloud => {
+                ctx.beginPath();
+                ctx.arc(cloud.x, cloud.y, cloud.width/3, 0, Math.PI * 2);
+                ctx.arc(cloud.x + cloud.width/3, cloud.y, cloud.width/4, 0, Math.PI * 2);
+                ctx.arc(cloud.x + cloud.width/2, cloud.y, cloud.width/3, 0, Math.PI * 2);
+                ctx.fill();
+                
+                cloud.x -= cloud.speed;
+                if(cloud.x + cloud.width < 0) {
+                    cloud.x = canvas.width + Math.random() * 100;
+                    cloud.y = Math.random() * 200 + 50;
+                }
+            });
+        }
+        
+        function updateBird() {
+            bird.velocity += bird.gravity;
+            bird.y += bird.velocity;
+            
+            // Limitar velocidade máxima de queda
+            if(bird.velocity > 4) {
+                bird.velocity = 4;
+            }
+            
+            // Bird rotation based on velocity - mais suave
+            bird.rotation = Math.min(Math.max(bird.velocity * 0.06, -0.3), 0.5);
+            
+            // Prevent bird from going above screen
+            if (bird.y < 0) {
+                bird.y = 0;
+                bird.velocity = 0;
+            }
+        }
+        
+        function updatePipes() {
+            // Move pipes
+            for(let i = pipes.length - 1; i >= 0; i--) {
+                pipes[i].x -= pipeSpeed;
+                
+                // Remove off-screen pipes
+                if(pipes[i].x + pipeWidth < 0) {
+                    pipes.splice(i, 1);
+                    continue;
+                }
+                
+                // Check for scoring
+                if(!pipes[i].scored && pipes[i].x + pipeWidth < bird.x) {
+                    score++;
+                    pipes[i].scored = true;
+                    document.getElementById('scoreDisplay').textContent = score;
+                }
+            }
+            
+            // Add new pipes
+            if(pipes.length === 0 || pipes[pipes.length - 1].x < canvas.width - 220) {
+                const topHeight = Math.random() * (canvas.height - ground.height - pipeGap - 100) + 50;
+                pipes.push({
+                    x: canvas.width,
+                    topHeight: topHeight,
+                    scored: false
+                });
+            }
+        }
+        
+        function checkCollisions() {
+            // Ground collision
+            if(bird.y + bird.height >= ground.y) {
+                return true;
+            }
+            
+            // Pipe collisions
+            for(let pipe of pipes) {
+                if(bird.x < pipe.x + pipeWidth && bird.x + bird.width > pipe.x) {
+                    if(bird.y < pipe.topHeight || bird.y + bird.height > pipe.topHeight + pipeGap) {
+                        return true;
+                    }
+                }
+            }
+            
+            return false;
+        }
+        
+        function jump() {
+            if(gameState === 'start') {
+                startGame();
+            } else if(gameState === 'playing') {
+                bird.velocity = bird.jumpStrength;
+                playJumpSound(); // Som do pulo estilo pac-man
+            }
+        }
+        
+        function startGame() {
+            gameState = 'playing';
+            score = 0;
+            bird.y = canvas.height / 2;
+            bird.velocity = 0;
+            bird.rotation = 0;
+            pipes = [];
+            
+            document.getElementById('startScreen').style.display = 'none';
+            document.getElementById('gameOverScreen').style.display = 'none';
+            document.getElementById('scoreDisplay').style.display = 'block';
+            document.getElementById('scoreDisplay').textContent = '0';
+        }
+        
+        function gameOver() {
+            gameState = 'gameOver';
+            playCollisionSound(); // Som de calibrador quando bate no pneu
+            
+            if(score > bestScore) {
+                bestScore = score;
+            }
+            
+            document.getElementById('finalScore').textContent = score;
+            document.getElementById('bestScore').textContent = bestScore;
+            document.getElementById('scoreDisplay').style.display = 'none';
+            document.getElementById('gameOverScreen').style.display = 'block';
+        }
+        
+        function restartGame() {
+            gameState = 'start';
+            bird.y = canvas.height / 2;
+            bird.velocity = 0;
+            bird.rotation = 0;
+            pipes = [];
+            document.getElementById('startScreen').style.display = 'block';
+            document.getElementById('gameOverScreen').style.display = 'none';
+            document.getElementById('scoreDisplay').style.display = 'none';
+        }
+        
+        function gameLoop() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw background elements
+            drawClouds();
+            drawGround();
+            
+            if(gameState === 'playing') {
+                updateBird();
+                updatePipes();
+                
+                if(checkCollisions()) {
+                    gameOver();
+                }
+            }
+            
+            // Draw pipes
+            pipes.forEach(pipe => drawPipe(pipe.x, pipe.topHeight));
+            
+            // Draw bird
+            drawBird();
+            
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Event listeners
+        canvas.addEventListener('click', () => {
+            // Inicializar áudio context no primeiro clique (requerimento dos browsers)
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            jump();
+        });
+        document.addEventListener('keydown', (e) => {
+            if(e.code === 'Space') {
+                e.preventDefault();
+                // Inicializar áudio context no primeiro espaço
+                if (!audioContext) {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                jump();
+            }
+        });
+        
+        // Start the game loop
+        gameLoop();
+    </script>
+</body>
+</html>
